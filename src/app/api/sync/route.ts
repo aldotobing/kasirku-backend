@@ -1,14 +1,19 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient();
+// Use a global prisma client to avoid exhausting connection limits in serverless
+const globalForPrisma = global as unknown as { prisma: PrismaClient };
+const prisma = globalForPrisma.prisma || new PrismaClient();
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+    console.log("Sync: Received payload");
     const { categories, products, transactions } = body;
 
     const result = await prisma.$transaction(async (tx) => {
+      // 1. Sync Categories
       if (categories && Array.isArray(categories)) {
         for (const cat of categories) {
           await tx.category.upsert({
@@ -29,6 +34,7 @@ export async function POST(request: Request) {
         }
       }
 
+      // 2. Sync Products
       if (products && Array.isArray(products)) {
         for (const prod of products) {
           await tx.product.upsert({
@@ -57,6 +63,7 @@ export async function POST(request: Request) {
         }
       }
 
+      // 3. Sync Transactions
       if (transactions && Array.isArray(transactions)) {
         for (const txData of transactions) {
           const existingTx = await tx.transaction.findUnique({
@@ -90,11 +97,20 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result);
   } catch (error: any) {
-    console.error('Sync Error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('Sync Fatal Error:', error);
+    return NextResponse.json({ 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    }, { status: 500 });
   }
 }
 
 export async function GET() {
-  return NextResponse.json({ status: 'Sync API is active' });
+  try {
+    // Check DB connection
+    await prisma.$queryRaw`SELECT 1`;
+    return NextResponse.json({ status: 'Sync API is active', database: 'connected' });
+  } catch (e: any) {
+    return NextResponse.json({ status: 'Sync API is active', database: 'error', message: e.message }, { status: 500 });
+  }
 }
