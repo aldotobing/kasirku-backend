@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 
-// Use a global prisma client to avoid exhausting connection limits in serverless
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
 const prisma = globalForPrisma.prisma || new PrismaClient();
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
@@ -9,7 +8,6 @@ if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    console.log("Sync: Received payload");
     const { categories, products, transactions } = body;
 
     const result = await prisma.$transaction(async (tx) => {
@@ -66,17 +64,19 @@ export async function POST(request: Request) {
       // 3. Sync Transactions
       if (transactions && Array.isArray(transactions)) {
         for (const txData of transactions) {
+          const header = txData.header;
           const existingTx = await tx.transaction.findUnique({
-            where: { id: txData.header.id },
+            where: { id: header.id },
           });
 
           if (!existingTx) {
             await tx.transaction.create({
               data: {
-                id: txData.header.id,
-                totalAmount: txData.header.totalAmount,
-                paymentMethod: txData.header.paymentMethod,
-                createdAt: new Date(txData.header.createdAt),
+                id: header.id,
+                totalAmount: header.totalAmount,
+                // Handle both camelCase and snake_case for robust sync
+                paymentMethod: header.paymentMethod || header.payment_method,
+                createdAt: new Date(header.createdAt),
                 items: {
                   create: txData.items.map((item: any) => ({
                     id: item.id,
@@ -107,7 +107,6 @@ export async function POST(request: Request) {
 
 export async function GET() {
   try {
-    // Check DB connection
     await prisma.$queryRaw`SELECT 1`;
     return NextResponse.json({ status: 'Sync API is active', database: 'connected' });
   } catch (e: any) {
