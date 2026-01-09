@@ -10,6 +10,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { categories, products, transactions } = body;
 
+    // Increased timeout to 30 seconds to handle larger sync payloads or network latency
     const result = await prisma.$transaction(async (tx) => {
       // 1. Sync Categories
       if (categories && Array.isArray(categories)) {
@@ -74,7 +75,6 @@ export async function POST(request: Request) {
               data: {
                 id: header.id,
                 totalAmount: header.totalAmount,
-                // Handle both camelCase and snake_case for robust sync
                 paymentMethod: header.paymentMethod || header.payment_method,
                 createdAt: new Date(header.createdAt),
                 items: {
@@ -93,12 +93,15 @@ export async function POST(request: Request) {
       }
 
       return { success: true };
+    }, {
+      maxWait: 5000, // default
+      timeout: 30000, // 30 seconds
     });
 
     return NextResponse.json(result);
   } catch (error: any) {
     console.error('Sync Fatal Error:', error);
-    return NextResponse.json({ 
+    return NextResponse.json({
       error: error.message,
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     }, { status: 500 });
@@ -110,6 +113,6 @@ export async function GET() {
     await prisma.$queryRaw`SELECT 1`;
     return NextResponse.json({ status: 'Sync API is active', database: 'connected' });
   } catch (e: any) {
-    return NextResponse.json({ status: 'Sync API is active', database: 'error', message: e.message }, { status: 500 });
+    return NextResponse.json({ status: 'Sync API is active', database: 'error', message: e.message }, { status: 500 });  
   }
 }
